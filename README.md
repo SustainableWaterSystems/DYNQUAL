@@ -16,5 +16,7 @@ Folder “Future_analyses.zip”
 - Script_R1.py to Script_Z1.py: These scripts are for the analysis of this study over the period 2020-2100 using the hybrid model output.
 
 References
+
 Jones, E. R., Bierkens, M. F. P., Wanders, N., Sutanudjaja, E. H., van Beek, L. P. H., and van Vliet, M. T. H.: DynQual v1.0: a high-resolution global surface water quality model, Geosci. Model Dev., 16, 4481–4500, https://doi.org/10.5194/gmd-16-4481-2023, 2023.
+
 Graham, D.J., Bierkens, M.F.P., van Vliet, M.T.H. Impacts of droughts and heatwaves on river water quality worldwide. Journal of Hydrology 629, 130590, https://doi.org/10.1016/j.jhydrol.2023.130590, 2024
