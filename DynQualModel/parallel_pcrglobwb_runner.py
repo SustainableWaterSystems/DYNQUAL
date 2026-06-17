@@ -3,20 +3,13 @@
 from __future__ import print_function
 
 #
-# PCR-GLOBWB2 (PCRaster Global Water Balance) Global Hydrological Model
+# PCR-GLOBWB (PCRaster Global Water Balance) Global Hydrological Model
 #
 # Copyright (C) 2016, Edwin H. Sutanudjaja, Rens van Beek, Niko Wanders, Yoshihide Wada, 
 # Joyce H. C. Bosmans, Niels Drost, Ruud J. van der Ent, Inge E. M. de Graaf, Jannis M. Hoch, 
 # Kor de Jong, Derek Karssenberg, Patricia López López, Stefanie Peßenteiner, Oliver Schmitz, 
 # Menno W. Straatsma, Ekkamol Vannametee, Dominik Wisser, and Marc F. P. Bierkens
 # Faculty of Geosciences, Utrecht University, Utrecht, The Netherlands
-#
-# DynQual (Dynamic Quality) Global Water Quality Model v1.0
-# Edward R. Jones, Michelle T.H. van Vliet, Niko Wanders, Edwin H. Sutanudjaja, Rens van Beek, and Marc F. P. Bierkens
-# Faculty of Geosciences, Utrecht University, Utrecht, The Netherlands
-#
-# This script is designed for running online DynQual runs in parallel (self.offline = False)
-# In this configuration, hydrology is simulated with the PCR-GLOBWB2 GHM.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -91,14 +84,6 @@ if os.path.exists(global_maps_folder):
     os.makedirs(global_maps_folder)
 else:
     os.makedirs(global_maps_folder)
-    
-# make global netcdf directory (it will contain a "netcdf" directory that will contain merged netcdfs after post-processing)
-global_netcdf_folder = generalConfiguration.globalOptions['outputDir']+"/global/netcdf/"
-if os.path.exists(global_netcdf_folder):
-    shutil.rmtree(global_netcdf_folder)
-    os.makedirs(global_netcdf_folder)
-else:
-    os.makedirs(global_netcdf_folder)
 
 # make the backup of these python scripts to a specific backup folder and go to the backup folder
 scriptDir = generalConfiguration.globalOptions['outputDir'] + "/global/scripts/"
@@ -142,6 +127,32 @@ clone_codes = list(set(generalConfiguration.globalOptions['cloneAreas'].split(",
 # - for one global run (that should be using a fat node):
 if clone_codes[0] == "Global": 
     clone_codes = ['M%02d'%i for i in range(1,54,1)]
+#
+# - using two (thick) nodes:
+if clone_codes[0] == "part_one": 
+    #
+    # the relative big ones
+    clone_codes  = ["M17","M19","M26","M13","M18","M20","M05","M03","M21","M46","M27","M49","M16","M44","M52","M25","M09","M08","M11","M42","M12","M39"]
+    #~ # - and plus one of the two smallest ones
+    #~ clone_codes += ["M29"]
+    #~ # - and plus two of the smallest ones 
+    #~ clone_codes += ["M30","M29"]
+    #
+    #
+if clone_codes[0] == "part_two": 
+    #
+    # the relative small ones
+    clone_codes = ["M07","M15","M38","M48","M40","M41","M22","M14","M23","M51","M04","M06","M10","M02","M45","M35","M47","M50","M24","M01","M36","M53","M33","M43","M34","M37","M31","M32","M28","M30","M29"]
+    #~ # the relative small ones minus one of the the two smallest ones
+    #~ clone_codes = ["M07","M15","M38","M48","M40","M41","M22","M14","M23","M51","M04","M06","M10","M02","M45","M35","M47","M50","M24","M01","M36","M53","M33","M43","M34","M37","M31","M32","M28","M30"]
+    #~ # the relative small ones minus two of the smallest ones
+    #~ clone_codes = ["M07","M15","M38","M48","M40","M41","M22","M14","M23","M51","M04","M06","M10","M02","M45","M35","M47","M50","M24","M01","M36","M53","M33","M43","M34","M37","M31","M32","M28"]
+    #
+    # TODO: Improve the selection of clones for part two, something likes: clones_part_two = clones_all - clones_part_one
+    #
+    # the execution of merging and modflow processes are done in another node
+    with_merging_or_modflow = False
+
 
 # command line(s) for PCR-GLOBWB 
 logger.info('Running transient PCR-GLOBWB with/without MODFLOW ')
