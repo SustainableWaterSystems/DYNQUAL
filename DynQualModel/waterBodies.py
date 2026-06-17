@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-# PCR-GLOBWB2 (PCRaster Global Water Balance) Global Hydrological Model
+# PCR-GLOBWB (PCRaster Global Water Balance) Global Hydrological Model
 #
 # Copyright (C) 2016, Edwin H. Sutanudjaja, Rens van Beek, Niko Wanders, Yoshihide Wada, 
 # Joyce H. C. Bosmans, Niels Drost, Ruud J. van der Ent, Inge E. M. de Graaf, Jannis M. Hoch, 
@@ -9,14 +9,18 @@
 # Menno W. Straatsma, Ekkamol Vannametee, Dominik Wisser, and Marc F. P. Bierkens
 # Faculty of Geosciences, Utrecht University, Utrecht, The Netherlands
 #
-# DynQual (Dynamic Quality) Global Water Quality Model v1.0
-# Edward R. Jones, Michelle T.H. van Vliet, Niko Wanders, Edwin H. Sutanudjaja, Rens van Beek, and Marc F. P. Bierkens
-# Faculty of Geosciences, Utrecht University, Utrecht, The Netherlands
-
-'''
-Water bodies in PCR-GLOBWB2
-@author: Niko Wanders, Edward Jones
-'''
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
 import types
@@ -32,7 +36,7 @@ import virtualOS as vos
 
 class WaterBodies(object):
 
-    def __init__(self,iniItems,landmask):
+    def __init__(self, iniItems, landmask, onlyNaturalWaterBodies = False, lddMap = None):
         object.__init__(self)
 
         # clone map file names, temporary directory and global/absolute path of input directory
@@ -40,28 +44,45 @@ class WaterBodies(object):
         self.tmpDir   = iniItems.tmpDir
         self.inputDir = iniItems.globalOptions['inputDir']
         self.landmask = landmask
+        
+        self.iniItems = iniItems
                 
+        # local drainage direction:
+        if lddMap is None:
+            self.lddMap = vos.readPCRmapClone(iniItems.routingOptions['lddMap'],
+                                                  self.cloneMap,self.tmpDir,self.inputDir,True)
+            self.lddMap = pcr.lddrepair(pcr.ldd(self.lddMap))
+            self.lddMap = pcr.lddrepair(self.lddMap)
+        else:    
+            self.lddMap = lddMap
+
+        # the following is needed for a modflowOfflineCoupling run
+        if 'modflowOfflineCoupling' in list(iniItems.globalOptions.keys()) and iniItems.globalOptions['modflowOfflineCoupling'] == "True" and 'routingOptions' not in iniItems.allSections: 
+            logger.info("The 'routingOptions' are not defined in the configuration ini file. We will adopt them from the 'modflowParameterOptions'.")
+            iniItems.routingOptions = iniItems.modflowParameterOptions
+
+
         # option to activate water balance check
         self.debugWaterBalance = True
-        if iniItems.routingOptions['debugWaterBalance'] == "False":
+        if 'debugWaterBalance' in list(iniItems.routingOptions.keys()) and iniItems.routingOptions['debugWaterBalance'] == "False":
             self.debugWaterBalance = False
-
+        
         # option to perform a run with only natural lakes (without reservoirs)
-        self.onlyNaturalWaterBodies = False
-        if "onlyNaturalWaterBodies" in iniItems.routingOptions.keys() and iniItems.routingOptions['onlyNaturalWaterBodies'] == "True":
-            logger.info("WARNING!! Using only natural water bodies identified in the year 1900. All reservoirs in 1900 are assumed as lakes.")
+        self.onlyNaturalWaterBodies = onlyNaturalWaterBodies
+        if "onlyNaturalWaterBodies" in list(iniItems.routingOptions.keys()) and iniItems.routingOptions['onlyNaturalWaterBodies'] == "True":
+            logger.info("Using only natural water bodies identified in the year 1900. All reservoirs in 1900 are assumed as lakes.")
             self.onlyNaturalWaterBodies  = True
             self.dateForNaturalCondition = "1900-01-01"                  # The run for a natural condition should access only this date.   
         
         # names of files containing water bodies parameters
+        self.useNetCDF = True
         if iniItems.routingOptions['waterBodyInputNC'] == str(None):
             self.useNetCDF = False
-            self.fracWaterInp          = iniItems.routingOptions['fracWaterInp']
-            self.waterBodyIdsInp       = iniItems.routingOptions['waterBodyIds']
-            self.waterBodyTypInp       = iniItems.routingOptions['waterBodyTyp']
-            self.resMaxCapInp          = iniItems.routingOptions['resMaxCapInp']
-            self.resSfAreaInp          = iniItems.routingOptions['resSfAreaInp']
-            self.waterBodyShF          = iniItems.routingOptions['waterBodyShF']
+            self.fracWaterInp    = iniItems.routingOptions['fracWaterInp']
+            self.waterBodyIdsInp = iniItems.routingOptions['waterBodyIds']
+            self.waterBodyTypInp = iniItems.routingOptions['waterBodyTyp']
+            self.resMaxCapInp    = iniItems.routingOptions['resMaxCapInp']
+            self.resSfAreaInp    = iniItems.routingOptions['resSfAreaInp']
         else:
             self.useNetCDF = True
             self.ncFileInp       = vos.getFullPath(\
@@ -73,12 +94,23 @@ class WaterBodies(object):
 
         # lower and upper limits at which reservoir release is terminated and 
         #                        at which reservoir release is equal to long-term average outflow
+        # - default values
         self.minResvrFrac = 0.10
         self.maxResvrFrac = 0.75
+        # - from the ini file
+        if "minResvrFrac" in list(iniItems.routingOptions.keys()):
+            minResvrFrac = iniItems.routingOptions['minResvrFrac']
+            self.minResvrFrac = vos.readPCRmapClone(minResvrFrac,
+                                                    self.cloneMap, self.tmpDir, self.inputDir)
+        if "maxResvrFrac" in list(iniItems.routingOptions.keys()):
+            maxResvrFrac = iniItems.routingOptions['maxResvrFrac']
+            self.maxResvrFrac = vos.readPCRmapClone(maxResvrFrac,
+                                                    self.cloneMap, self.tmpDir, self.inputDir)
+
 
     def getParameterFiles(self,currTimeStep,cellArea,ldd,\
-                               cellLengthFD,cellSizeInArcDeg,\
-                               initial_condition_dictionary = None):
+                               initial_condition_dictionary = None,\
+                               currTimeStepInDateTimeFormat = False):
 
         # parameters for Water Bodies: fracWat              
         #                              waterBodyIds
@@ -92,53 +124,47 @@ class WaterBodies(object):
         ldd = pcr.ifthen(self.landmask, ldd)
         
         # date used for accessing/extracting water body information
-        date_used = currTimeStep.fulldate
-        year_used = currTimeStep.year
+        if currTimeStepInDateTimeFormat:
+            date_used = currTimeStep
+            year_used = currTimeStep.year
+        else:
+            date_used = currTimeStep.fulldate
+            year_used = currTimeStep.year
         if self.onlyNaturalWaterBodies == True:
             date_used = self.dateForNaturalCondition
             year_used = self.dateForNaturalCondition[0:4] 
         
         # fracWat = fraction of surface water bodies (dimensionless)
-        self.fracWat = pcr.scalar(0.0)
+        self.fracWat = pcr.spatial(pcr.scalar(0.0))
         
         if self.useNetCDF:
             self.fracWat = vos.netcdf2PCRobjClone(self.ncFileInp,'fracWaterInp', \
                            date_used, useDoy = 'yearly',\
                            cloneMapFileName = self.cloneMap)
         else:
-            self.fracWat = vos.readPCRmapClone(\
-                           self.fracWaterInp+str(year_used)+".map",
-                           self.cloneMap,self.tmpDir,self.inputDir)
+            if self.fracWaterInp != "None":
+                self.fracWat = vos.readPCRmapClone(\
+                               self.fracWaterInp+str(year_used)+".map",
+                               self.cloneMap,self.tmpDir,self.inputDir)
         
-        self.fracWat = pcr.cover(self.fracWat, 0.0)
-        self.fracWat = pcr.max(0.0,self.fracWat)
-        self.fracWat = pcr.min(1.0,self.fracWat)
+        self.fracWat = pcr.cover(self.fracWat, pcr.spatial(pcr.scalar(0.0)))
+        self.fracWat = pcr.max(0.0, self.fracWat)
+        self.fracWat = pcr.min(1.0, self.fracWat)
         
-        self.waterBodyIds  = pcr.nominal(0)    # waterBody ids
-        self.waterBodyOut  = pcr.boolean(0)    # waterBody outlets
-        self.waterBodyArea = pcr.scalar(0.)    # waterBody surface areas
+        self.waterBodyIds  = pcr.spatial(pcr.nominal(0))    # waterBody ids
+        self.waterBodyOut  = pcr.spatial(pcr.boolean(0))    # waterBody outlets
+        self.waterBodyArea = pcr.spatial(pcr.scalar(0.))    # waterBody surface areas
 
-        # water shape factor
-        if self.useNetCDF:
-            self.waterBodyShapeFactor = 3000.0
-            #vos.netcdf2PCRobjClone(self.ncFileInp,'waterBodyShF', \
-                                #date_used, useDoy = 'yearly',\
-                                #cloneMapFileName = self.cloneMap)
-        else:
-            self.waterBodyShapeFactor = vos.readPCRmapClone(\
-                self.waterBodyShF+str(year_used)+".map",\
-                self.cloneMap,self.tmpDir,self.inputDir,False,None,True)
-             
-        
         # water body ids
         if self.useNetCDF:
             self.waterBodyIds = vos.netcdf2PCRobjClone(self.ncFileInp,'waterBodyIds', \
                                 date_used, useDoy = 'yearly',\
                                 cloneMapFileName = self.cloneMap)
         else:
-            self.waterBodyIds = vos.readPCRmapClone(\
-                self.waterBodyIdsInp+str(year_used)+".map",\
-                self.cloneMap,self.tmpDir,self.inputDir,False,None,True)
+            if self.waterBodyIdsInp != "None":
+                self.waterBodyIds = vos.readPCRmapClone(\
+                    self.waterBodyIdsInp+str(year_used)+".map",\
+                    self.cloneMap,self.tmpDir,self.inputDir,False,None,True)
         #
         self.waterBodyIds = pcr.ifthen(\
                             pcr.scalar(self.waterBodyIds) > 0.,\
@@ -149,11 +175,7 @@ class WaterBodies(object):
         self.waterBodyOut = pcr.ifthen(wbCatchment ==\
                             pcr.areamaximum(wbCatchment, \
                             self.waterBodyIds),\
-                            self.waterBodyIds)     # = outlet ids   
-        self.waterBodyOut = pcr.ifthen(\
-                            pcr.scalar(self.waterBodyIds) > 0.,\
-                            self.waterBodyOut)
-
+                            self.waterBodyIds) # = outlet ids           # This may give more than two outlets, particularly if there are more than one cells that have largest upstream areas      
         # - make sure that there is only one outlet for each water body 
         self.waterBodyOut = pcr.ifthen(\
                             pcr.areaorder(pcr.scalar(self.waterBodyOut), \
@@ -161,26 +183,18 @@ class WaterBodies(object):
         self.waterBodyOut = pcr.ifthen(\
                             pcr.scalar(self.waterBodyIds) > 0.,\
                             self.waterBodyOut)
-
-        # relative fraction of cell to total waterbody fraction
-        self.waterBodyRelativeFrac = pcr.cover(pcr.ifthen(pcr.scalar(self.waterBodyIds) > 0., \
-                                          self.fracWat/pcr.areatotal(self.fracWat,\
-                                                        self.waterBodyIds)),0.)
-        # set in                                                
-        self.dynamicFracWat = self.fracWat                                                
+        
         # TODO: Please also consider endorheic lakes!                    
-        # correction for multiple outlet reservoirs
-        # self.waterBodyIds = pcr.ifthen(pcr.scalar(self.waterBodyIds) > 0.,
-        #                    pcr.subcatchment(ldd,\
-        #                    pcr.nominal(pcr.uniqueid(pcr.boolean(self.waterBodyOut)))))
-        #self.waterBodyIds = pcr.ifthen(\
-        #                    pcr.scalar(self.waterBodyIds) > 0.,\
-        #                    pcr.subcatchment(ldd,self.waterBodyOut))
 
+        # correcting water body ids
+        self.waterBodyIds = pcr.ifthen(\
+                            pcr.scalar(self.waterBodyIds) > 0.,\
+                            pcr.subcatchment(ldd,self.waterBodyOut))
+        
         # boolean map for water body outlets:   
         self.waterBodyOut = pcr.ifthen(\
                             pcr.scalar(self.waterBodyOut) > 0.,\
-                            pcr.boolean(1))
+                            pcr.spatial(pcr.boolean(1)))
 
         # reservoir surface area (m2):
         if self.useNetCDF:
@@ -189,9 +203,12 @@ class WaterBodies(object):
                         date_used, useDoy = 'yearly',\
                         cloneMapFileName = self.cloneMap)
         else:
-            resSfArea = 1000. * 1000. * vos.readPCRmapClone(
-                   self.resSfAreaInp+str(year_used)+".map",\
-                   self.cloneMap,self.tmpDir,self.inputDir)
+            if self.resSfAreaInp != "None":
+                resSfArea = 1000. * 1000. * vos.readPCRmapClone(
+                       self.resSfAreaInp+str(year_used)+".map",\
+                       self.cloneMap,self.tmpDir,self.inputDir)
+            else:
+                resSfArea = pcr.spatial(pcr.scalar(0.0))
         resSfArea = pcr.areaaverage(resSfArea,self.waterBodyIds)                        
         resSfArea = pcr.cover(resSfArea,0.)                        
 
@@ -217,13 +234,15 @@ class WaterBodies(object):
         self.waterBodyTyp = pcr.nominal(0)
         
         if self.useNetCDF:
-            self.waterBodyTyp = pcr.cover(vos.netcdf2PCRobjClone(self.ncFileInp,'waterBodyTyp', \
+            self.waterBodyTyp = vos.netcdf2PCRobjClone(self.ncFileInp,'waterBodyTyp', \
                                 date_used, useDoy = 'yearly',\
-                                cloneMapFileName = self.cloneMap),pcr.scalar(0.0))
+                                cloneMapFileName = self.cloneMap)
         else:
-            self.waterBodyTyp = vos.readPCRmapClone(
-                self.waterBodyTypInp+str(year_used)+".map",\
-                self.cloneMap,self.tmpDir,self.inputDir,False,None,True)
+            if self.waterBodyTypInp != "None":
+                self.waterBodyTyp = vos.readPCRmapClone(
+                    self.waterBodyTypInp+str(year_used)+".map",\
+                    self.cloneMap,self.tmpDir,self.inputDir,False,None,True)
+
         # excluding wetlands (waterBodyTyp = 0) in all functions related to lakes/reservoirs 
         #
         self.waterBodyTyp = pcr.ifthen(\
@@ -239,6 +258,7 @@ class WaterBodies(object):
                             pcr.nominal(self.waterBodyTyp))    
         self.waterBodyTyp = pcr.ifthen(pcr.boolean(self.waterBodyIds),
                                                    self.waterBodyTyp)
+
         # correcting lakes and reservoirs ids and outlets
         self.waterBodyIds = pcr.ifthen(pcr.scalar(self.waterBodyTyp) > 0,
                                                   self.waterBodyIds)               
@@ -255,11 +275,12 @@ class WaterBodies(object):
                              date_used, useDoy = 'yearly',\
                              cloneMapFileName = self.cloneMap)
         else:
-            self.resMaxCap = 1000. * 1000. * vos.readPCRmapClone(\
-                self.resMaxCapInp+str(year_used)+".map", \
-                self.cloneMap,self.tmpDir,self.inputDir)
+            if self.resMaxCapInp != "None":
+                self.resMaxCap = 1000. * 1000. * vos.readPCRmapClone(\
+                    self.resMaxCapInp+str(year_used)+".map", \
+                    self.cloneMap,self.tmpDir,self.inputDir)
 
-        self.resMaxCap = pcr.ifthen(self.resMaxCap > 0,\
+        self.resMaxCap = pcr.ifthen(self.resMaxCap > 0.,\
                                     self.resMaxCap)
         self.resMaxCap = pcr.areaaverage(self.resMaxCap,\
                                          self.waterBodyIds)
@@ -288,12 +309,13 @@ class WaterBodies(object):
         self.waterBodyIds = pcr.ifthen(pcr.scalar(self.waterBodyTyp) > 0.,\
                             self.waterBodyIds)                                # make sure that all lakes and/or reservoirs have ids
         self.waterBodyOut = pcr.ifthen(pcr.scalar(self.waterBodyIds) > 0.,\
-                                                  self.waterBodyOut)          # make sure that all lakes and/or reservoirs have outlets    
+                                                  self.waterBodyOut)          # make sure that all lakes and/or reservoirs have outlets
+        
         
         # for a natural run (self.onlyNaturalWaterBodies == True) 
         # which uses only the year 1900, assume all reservoirs are lakes
         if self.onlyNaturalWaterBodies == True and date_used == self.dateForNaturalCondition:
-            logger.info("WARNING!! Using only natural water bodies identified in the year 1900. All reservoirs in 1900 are assumed as lakes.")
+            logger.info("Using only natural water bodies identified in the year 1900. All reservoirs in 1900 are assumed as lakes.")
             self.waterBodyTyp = \
              pcr.ifthen(pcr.scalar(self.waterBodyTyp) > 0.,\
                         pcr.nominal(1))                         
@@ -301,23 +323,32 @@ class WaterBodies(object):
         # check that all lakes and/or reservoirs have types, ids, surface areas and outlets:
         test = pcr.defined(self.waterBodyTyp) & pcr.defined(self.waterBodyArea) &\
                pcr.defined(self.waterBodyIds) & pcr.boolean(pcr.areamaximum(pcr.scalar(self.waterBodyOut), self.waterBodyIds))
-        a,b,c = vos.getMinMaxMean(pcr.scalar(test) - pcr.scalar(1.0))
+        a,b,c = vos.getMinMaxMean(pcr.cover(pcr.scalar(test), 1.0) - pcr.scalar(1.0))
         threshold = 1e-3
         if abs(a) > threshold or abs(b) > threshold:
-            logger.info("WARNING !!!!! Missing information in some lakes and/or reservoirs.")
+            logger.warning("Missing information in some lakes and/or reservoirs.")
 
         # at the beginning of simulation period (timeStepPCR = 1)
         # - we have to define/get the initial conditions 
         #
-        if currTimeStep.timeStepPCR == 1:
+        if initial_condition_dictionary != None and currTimeStep.timeStepPCR == 1:
             self.getICs(initial_condition_dictionary)
         
         # For each new reservoir (introduced at the beginning of the year)
         # initiating storage, average inflow and outflow
+        # PS: THIS IS NOT NEEDED FOR OFFLINE MODFLOW RUN! 
         #
-        self.waterBodyStorage = pcr.cover(self.waterBodyStorage,0.0)
-        self.avgInflow        = pcr.cover(self.avgInflow ,0.0)
-        self.avgOutflow       = pcr.cover(self.avgOutflow,0.0)
+        try:
+            self.waterBodyStorage = pcr.cover(self.waterBodyStorage,0.0)
+            self.avgInflow        = pcr.cover(self.avgInflow ,0.0)
+            self.avgOutflow       = pcr.cover(self.avgOutflow,0.0)
+            self.waterBodyStorage = pcr.ifthen(self.landmask, self.waterBodyStorage)
+            self.avgInflow        = pcr.ifthen(self.landmask, self.avgInflow       )
+            self.avgOutflow       = pcr.ifthen(self.landmask, self.avgOutflow      )
+        except:
+            # PS: FOR OFFLINE MODFLOW RUN!
+            pass
+        # TODO: Remove try and except    
 
         # cropping only in the landmask region:
         self.fracWat           = pcr.ifthen(self.landmask, self.fracWat         )
@@ -326,15 +357,12 @@ class WaterBodies(object):
         self.waterBodyArea     = pcr.ifthen(self.landmask, self.waterBodyArea   )
         self.waterBodyTyp      = pcr.ifthen(self.landmask, self.waterBodyTyp    )  
         self.waterBodyCap      = pcr.ifthen(self.landmask, self.waterBodyCap    )
-        self.waterBodyStorage  = pcr.ifthen(self.landmask, self.waterBodyStorage)
-        self.avgInflow         = pcr.ifthen(self.landmask, self.avgInflow       )
-        self.avgOutflow        = pcr.ifthen(self.landmask, self.avgOutflow      )
 
     def getICs(self,initial_condition):
 
         avgInflow  = initial_condition['avgLakeReservoirInflowShort']  
         avgOutflow = initial_condition['avgLakeReservoirOutflowLong'] 
-        #
+
         if initial_condition['waterBodyStorage'] is not None:
             # read directly 
             waterBodyStorage = initial_condition['waterBodyStorage']
@@ -359,8 +387,7 @@ class WaterBodies(object):
         self.avgInflow        = pcr.ifthen(self.landmask, self.avgInflow)
         self.avgOutflow       = pcr.ifthen(self.landmask, self.avgOutflow)
         self.waterBodyStorage = pcr.ifthen(self.landmask, self.waterBodyStorage)                                            
-        self.getWaterBodyDimensions()
-        
+
     def update(self,newStorageAtLakeAndReservoirs,\
                               timestepsToAvgDischarge,\
                            maxTimestepsToAvgDischargeShort,\
@@ -388,17 +415,19 @@ class WaterBodies(object):
              avgChannelDischarge,\
              length_of_time_step,\
              downstreamDemand)
-
-        self.getWaterBodyDimensions()             
-             
+        
         if self.debugWaterBalance:\
-           vos.waterBalanceCheck([          self.inflow/self.waterBodyArea],\
-                                 [self.waterBodyOutflow/self.waterBodyArea],\
-                                 [           preStorage/self.waterBodyArea],\
-                                 [self.waterBodyStorage/self.waterBodyArea],\
-                                   'WaterBodyStorage',\
+           vos.waterBalanceCheck([          pcr.cover(self.inflow/self.waterBodyArea,0.0)],\
+                                 [pcr.cover(self.waterBodyOutflow/self.waterBodyArea,0.0)],\
+                                 [           pcr.cover(preStorage/self.waterBodyArea,0.0)],\
+                                 [pcr.cover(self.waterBodyStorage/self.waterBodyArea,0.0)],\
+                                   'WaterBodyStorage (unit: m)',\
                                   True,\
-                                  currTimeStep.fulldate,threshold=1e-3)
+                                  currTimeStep.fulldate,threshold=5e-3)
+        
+        self.waterBodyBalance = (pcr.cover(self.inflow/self.waterBodyArea, 0.0) - pcr.cover(self.waterBodyOutflow/self.waterBodyArea,0.0)) -\
+                                (pcr.cover(self.waterBodyStorage/self.waterBodyArea,0.0) - pcr.cover(preStorage/self.waterBodyArea,0.0))
+                                  
 
     def moveFromChannelToWaterBody(self,\
                                    newStorageAtLakeAndReservoirs,\
@@ -414,14 +443,16 @@ class WaterBodies(object):
         # incoming volume (m3)
         self.inflow = newStorageAtLakeAndReservoirs - self.waterBodyStorage
         
-        # inflowInM3PerSec (m3/s)
-        inflowInM3PerSec = self.inflow / length_of_time_step
+        # TODO: Please check whether this inflow term includes evaporation loss?
+        
+        # inflowInM3PerSec (m3/s)                                       
+        self.inflowInM3PerSec = self.inflow / length_of_time_step
 
         # updating (short term) average inflow (m3/s) ; 
         # - needed to constrain lake outflow:
         #
         temp = pcr.max(1.0, pcr.min(maxTimestepsToAvgDischargeShort, self.timestepsToAvgDischarge - 1.0 + length_of_time_step / vos.secondsPerDay()))
-        deltaInflow = inflowInM3PerSec - self.avgInflow  
+        deltaInflow = self.inflowInM3PerSec - self.avgInflow  
         R = deltaInflow * ( length_of_time_step / vos.secondsPerDay() ) / temp
         self.avgInflow = self.avgInflow + R                
         self.avgInflow = pcr.max(0.0, self.avgInflow)
@@ -441,7 +472,8 @@ class WaterBodies(object):
         lakeOutflow = self.getLakeOutflow(avgChannelDischarge,length_of_time_step)  
              
         # outflow in volume from water bodies with reservoir type (m3): 
-        if downstreamDemand is not None: downstreamDemand = pcr.scalar(0.0)
+        if downstreamDemand is None:
+            downstreamDemand = pcr.scalar(0.0)
         reservoirOutflow = self.getReservoirOutflow(avgChannelDischarge,length_of_time_step,downstreamDemand)  
 
         # outgoing/release volume from lakes and/or reservoirs
@@ -475,14 +507,14 @@ class WaterBodies(object):
         # update waterBodyStorage (after outflow):
         self.waterBodyStorage = self.waterBodyStorage -\
                                 self.waterBodyOutflow
-        self.waterBodyStorage = pcr.max(0.0, self.waterBodyStorage)
+        self.waterBodyStorage = pcr.max(0.0, self.waterBodyStorage)                        
 
     def weirFormula(self,waterHeight,weirWidth): # output: m3/s
         sillElev  = pcr.scalar(0.0) 
         weirCoef  = pcr.scalar(1.0)
         weirFormula = \
-             (1.7*weirCoef*pcr.max(0,waterHeight-sillElev)**1.5) *\
-             weirWidth # m3/s         
+         (1.7*weirCoef*pcr.max(0,waterHeight-sillElev)**1.5) *\
+             weirWidth # m3/s
         return (weirFormula)
 
     def getLakeOutflow(self,\
@@ -505,7 +537,7 @@ class WaterBodies(object):
                      avgOutflow > 0.,\
                      avgOutflow,
                      pcr.max(avgChannelDischarge,self.avgInflow,0.001))            # This is needed when new lakes/reservoirs introduced (its avgOutflow is still zero).
-        avgOutflow = pcr.areamaximum(avgOutflow,self.waterBodyIds)             	
+        avgOutflow = pcr.areamaximum(avgOutflow,self.waterBodyIds)              
         #
         bankfullWidth = pcr.cover(\
                         pcr.scalar(4.8) * \
@@ -538,11 +570,21 @@ class WaterBodies(object):
 
         # avgOutflow (m3/s)
         avgOutflow = self.avgOutflow
+        # The following is needed when new lakes/reservoirs introduced (its avgOutflow is still zero).
+        #~ # - alternative 1
+        #~ avgOutflow = pcr.ifthenelse(\
+                     #~ avgOutflow > 0.,\
+                     #~ avgOutflow,
+                     #~ pcr.max(avgChannelDischarge, self.avgInflow, 0.001))
+        # - alternative 2
         avgOutflow = pcr.ifthenelse(\
                      avgOutflow > 0.,\
                      avgOutflow,
-                     pcr.max(avgChannelDischarge,self.avgInflow,0.001)) # This is needed when new lakes/reservoirs introduced (its avgOutflow is still zero).
-        avgOutflow = pcr.areamaximum(avgOutflow,self.waterBodyIds)             	
+                     pcr.max(avgChannelDischarge, self.avgInflow))
+        avgOutflow = pcr.ifthenelse(\
+                     avgOutflow > 0.,\
+                     avgOutflow, pcr.downstream(self.lddMap, avgOutflow))
+        avgOutflow = pcr.areamaximum(avgOutflow,self.waterBodyIds)              
 
         # calculate resvOutflow (m2/s) (based on reservoir storage and avgDischarge): 
         # - using reductionFactor in such a way that:
@@ -610,40 +652,3 @@ class WaterBodies(object):
         resvOutflow = pcr.ifthen(pcr.scalar(self.waterBodyIds) > 0., resvOutflow)
         resvOutflow = pcr.ifthen(pcr.scalar(self.waterBodyTyp) == 2, resvOutflow)
         return (resvOutflow) # unit: m3  
-
-    def getWaterBodyDimensions(self):
-
-        # Lake properties max depth and total lake area
-        lakeMaxDepth = ((3.0 * self.waterBodyStorage)/(self.waterBodyShapeFactor ** 2))**(1./3.)
-        lakeArea = (lakeMaxDepth * self.waterBodyShapeFactor) ** 2
-
-        # reservoir properties max depth at outlet and total reservoir area
-        reservoirMaxDepth = ((6.0 * self.waterBodyStorage)/(self.waterBodyShapeFactor ** 2))**(1./3.)
-        reservoirArea = 0.5 * (reservoirMaxDepth * self.waterBodyShapeFactor) ** 2
-        
-        # dynamic waterbody area, cannot exceed static waterbody extent as defined by input
-        self.dynamicArea = pcr.cover(pcr.ifthenelse(pcr.scalar(self.waterBodyTyp) == 1, lakeArea,\
-                              pcr.ifthen(pcr.scalar(self.waterBodyTyp) == 2, reservoirArea)), 0.)
-        
-        self.dynamicArea    = pcr.min(self.dynamicArea, self.waterBodyArea)
-        
-        # dynamic water fraction in gridcell
-        self.dynamicFracWat = self.dynamicArea * self.waterBodyRelativeFrac / self.cellArea #TODO check if this is correct
-                              
-        self.dynamicFracWat = pcr.cover(pcr.min(pcr.max(self.dynamicFracWat, 0.), self.fracWat), 0.)
-        self.dynamicFracWat = self.fracWat #TODO remove this line
-        self.dynamicFracWat = ifthen(self.landmask, self.dynamicFracWat)
-        
-
-        self.maxWaterDepth  = pcr.cover(pcr.ifthenelse(pcr.scalar(self.waterBodyTyp) == 1, lakeMaxDepth,\
-                              pcr.ifthen(pcr.scalar(self.waterBodyTyp) == 2, reservoirMaxDepth)))
-
-
-    def getThermoClineDepth(self):
-        self.mixingDepth = pcr.min(pcr.max(self.dynamicArea**0.1, pcr.scalar(1.0)),self.maxWaterDepth)
-        self.mixingDepth = pcr.min(pcr.scalar(3), self.maxWaterDepth)
-
-    def getThermoClineStorage(self):
-        self.hypolimnionStorage = pcr.min(pcr.ifthenelse(pcr.scalar(self.waterBodyTyp) == 1,\
-                             (((self.maxWaterDepth - self.mixingDepth)**3.) * (self.waterBodyShapeFactor ** 2))/3.0,\
-                             ifthen(pcr.scalar(self.waterBodyTyp) == 2, (((self.maxWaterDepth - self.mixingDepth)**3.) * (self.waterBodyShapeFactor ** 2))/6.0)), self.waterBodyStorage)

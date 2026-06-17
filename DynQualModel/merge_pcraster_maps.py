@@ -3,16 +3,12 @@
 from __future__ import print_function
 
 #
-# PCR-GLOBWB2 (PCRaster Global Water Balance) Global Hydrological Model
+# PCR-GLOBWB (PCRaster Global Water Balance) Global Hydrological Model
 #
 # Copyright (C) 2016, Edwin H. Sutanudjaja, Rens van Beek, Niko Wanders, Yoshihide Wada, 
 # Joyce H. C. Bosmans, Niels Drost, Ruud J. van der Ent, Inge E. M. de Graaf, Jannis M. Hoch, 
-# Kor de Jong, Derek Karssenberg, Patricia L√≥pez L√≥pez, Stefanie Pe√üenteiner, Oliver Schmitz, 
+# Kor de Jong, Derek Karssenberg, Patricia LÛpez LÛpez, Stefanie Peﬂenteiner, Oliver Schmitz, 
 # Menno W. Straatsma, Ekkamol Vannametee, Dominik Wisser, and Marc F. P. Bierkens
-# Faculty of Geosciences, Utrecht University, Utrecht, The Netherlands
-#
-# DynQual (Dynamic Quality) Global Water Quality Model v1.0
-# Edward R. Jones, Michelle T.H. van Vliet, Niko Wanders, Edwin H. Sutanudjaja, Rens van Beek, and Marc F. P. Bierkens
 # Faculty of Geosciences, Utrecht University, Utrecht, The Netherlands
 #
 # This program is free software: you can redistribute it and/or modify
@@ -28,7 +24,7 @@ from __future__ import print_function
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-# Edwin H. Sutanudjaja (24 June 2014): This script is to integrate several pcraster maps into one global map.
+# Edwin Husni Sutanudjaja (24 June 2014): This script is to integrate several pcraster maps into one global map.
 #                                         - Used mainly for making a set of initial conditions for 5 arc min runs. 
 
 #-modules
@@ -61,7 +57,7 @@ def getMin(x,a):
         return min(m,x)
 
 def getFileList(inputDir, filePattern):
-    '''creates a dictionary of  files meeting the pattern specified'''
+    '''creates a dictionary of files meeting the pattern specified'''
     fileNameList = glob.glob(os.path.join(inputDir, filePattern))
     ll= {}
     for fileName in fileNameList:
@@ -117,7 +113,7 @@ def checkRowPosition(r0,r1):
         return r0, r1
 
 def joinMaps(inputTuple):
-    '''Merges maps starting from an input tuple that specifies the output map name, the number of rows\
+    '''Merges maps starting from an input tuple that specifies the output map name, the number of rows
  and the number rows, columns, ULL X and Y coordinates, cell length and the missing value identifer and a list of input maps'''
     outputFileName= inputTuple[0]
     nrRows= inputTuple[1]
@@ -141,6 +137,10 @@ def joinMaps(inputTuple):
     variableArray= np.ones((nrRows,nrCols))*MV
     #-iterate over maps
     for fileName in fileNames:
+        # skip files that don't exist (missing clone areas)
+        if not os.path.isfile(fileName):
+            print('  skipping %s (file not found)' % fileName)
+            continue
         print(fileName)
         attributeClone= getMapAttributesALL(fileName)
         cellLengthClone= attributeClone['cellsize']
@@ -177,9 +177,10 @@ def joinMaps(inputTuple):
             setclone(fileName)
             sampleArray= pcr2numpy(readmap(fileName),MV)
             sampleNrRows, sampleNrCols= sampleArray.shape
-            #-create mask
-            mask= (variableArray[variableRow0:variableRow1,variableCol0:variableCol1] == MV) &\
-                (sampleArray[sampleRow0:sampleRow1,sampleCol0:sampleCol1] != MV)
+            #-create mask: only write valid (non-MV) values from the clone
+            # MV cells in each clone are skipped entirely so they cannot
+            # overwrite valid data from another clone in the same region
+            mask= (sampleArray[sampleRow0:sampleRow1,sampleCol0:sampleCol1] != MV)
             #-add values
             print(' adding values in %d, %d rows, columns from (x, y) %.3f, %.3f and %.3f, %.3f to position (row, col) %d, %d and %d, %d' %\
                 (sampleNrRows, sampleNrCols,sampleXMin,sampleYMin,sampleXMax,sampleYMax,variableRow0,variableCol0,variableRow1,variableCol1))
@@ -199,19 +200,17 @@ MV = 1e20
 
 # chosen date
 year = 1960
-chosenDate = datetime.date(int(year),12,31) # datetime.date(1979,12,31)
+chosenDate = datetime.date(int(year),12,31)
 try:
     chosenDate = str(sys.argv[1])
 except:
     pass
 
-# map coordinates and resolution 
-deltaLat= 5.0/60.0
-deltaLon= 5.0/60.0
+# map coordinates - resolution auto-detected from first input file below
 latMin= -90.
-latMax= 90.0
+latMax=  90.0
 lonMin= -180.
-lonMax= 180.0
+lonMax=  180.0
 
 inputDirRoot = ''  
 try:
@@ -219,14 +218,17 @@ try:
 except:
     pass
 
-#outputDir = inputDirRoot+"/global/maps/"
+outputDir = inputDirRoot+"/global/maps/"
 try:
-    outputDir = sys.argv[3]
-    if sys.argv[3] == "default": outputDir = inputDirRoot + "/global/maps/"
-    if sys.argv[3] == "maps"   : outputDir = inputDirRoot + "/global/maps/"
-    if sys.argv[3] == "states" : outputDir = inputDirRoot + "/global/states/"
+    if sys.argv[3] == "":
+        if sys.argv[4] == "default": outputDir = inputDirRoot + "/global/maps/"
+        if sys.argv[4] == "maps"   : outputDir = inputDirRoot + "/global/maps/"
+        if sys.argv[4] == "states" : outputDir = inputDirRoot + "/global/states/"
+    else:
+        outputDir = str(sys.argv[3])
 except:
-    outputDir = str(sys.argv[3])
+    pass
+
 try:
     os.makedirs(outputDir)
 except:
@@ -234,31 +236,51 @@ except:
 
 ncores = 8
 try:
-    ncores = int(sys.argv[4])
+    ncores = int(sys.argv[5])
 except:
     pass
 
-number_of_clone_maps = 51
+number_of_clone_maps = 53
 try:
-    number_of_clone_maps = int(sys.argv[5])
+    number_of_clone_maps = int(sys.argv[6])
 except:
     pass
 areas = ['M%02d'%i for i in range(1,number_of_clone_maps+1,1)]
 
-try:
-    areas = str(sys.argv[5])
-    areas = list(set(areas.split(",")))
-    #if areas[0] == "Global": areas = ['M%02d'%i for i in range(1,number_of_clone_maps+1,1)] 
-    if areas[0] == "Global": areas = ["M01","M02","M03","M04","M05","M06","M07","M08","M09","M10","M11","M12","M13","M14","M15","M16","M17","M18","M19","M20",
-                                  "M21","M22","M23","M24","M25","M26","M27","M30","M31","M32","M33","M34","M35","M36","M37","M38","M39","M40",
-                                  "M41","M42","M43","M44","M45","M46","M47","M48","M49","M50","M51","M52","M53"]
-except:
-    pass
+if sys.argv[6] == "Global":     areas = ['M%02d'%i for i in range(1,number_of_clone_maps+1,1)] 
+if sys.argv[6] == "Global_uly": areas = ['M%07d'%i for i in range(1,number_of_clone_maps+1,1)] 
+
+# Determine which subfolder to look in
+map_folder = 'maps'
+if sys.argv[4] == "states": map_folder = 'states'
+
+# Filter areas to only those that exist on disk (handles missing clones e.g. M28, M29)
+areas = [a for a in areas if os.path.isdir(os.path.join(inputDirRoot, a, map_folder))]
+print("Found %d existing areas: %s" % (len(areas), areas))
+
+if len(areas) == 0:
+    print("ERROR: no valid clone areas found under %s. Check inputDirRoot and map_folder." % inputDirRoot)
+    sys.exit(1)
+
+# Auto-detect resolution from the first map file found in the first area
+# This makes the script work for any resolution (5arcmin, 0.5deg, etc.)
+inputDirFirst = os.path.join(inputDirRoot, areas[0], map_folder)
+firstMapFiles = glob.glob(os.path.join(inputDirFirst, '*%s.map' % chosenDate))
+if len(firstMapFiles) == 0:
+    print("ERROR: no .map files found matching '*%s.map' in %s" % (chosenDate, inputDirFirst))
+    print("Check that chosenDate (%s) matches the file naming convention." % chosenDate)
+    sys.exit(1)
+
+firstMapAttrs = getMapAttributesALL(firstMapFiles[0])
+deltaLat = firstMapAttrs['cellsize']
+deltaLon = firstMapAttrs['cellsize']
+print("Auto-detected resolution: deltaLat=deltaLon=%.8f (%.4f deg = %.1f arcmin)" % (
+    deltaLat, deltaLat, deltaLat * 60.))
 
 #-main script
 #-get clone
-nrRows= int((latMax-latMin)/deltaLat)
-nrCols= int((lonMax-lonMin)/deltaLon)
+nrRows= int(round((latMax-latMin)/deltaLat))
+nrCols= int(round((lonMax-lonMin)/deltaLon))
 
 tempCloneMap = outputDir+'/temp_clone.map'
 command= 'mapattr -s -R %d -C %d -P "yb2t"  -B -x %f -y %f -l %f %s' %\
@@ -266,50 +288,37 @@ command= 'mapattr -s -R %d -C %d -P "yb2t"  -B -x %f -y %f -l %f %s' %\
 os.system(command)
 setclone(tempCloneMap)
 
-#~ print areas
-#~ print areas[0]
-
 # input files where unmerged maps are saved
-inputDir = os.path.join(inputDirRoot,areas[0], 'maps')
-if sys.argv[3] == "default": inputDir = os.path.join(inputDirRoot,areas[0], 'maps')
-if sys.argv[3] == "maps"   : inputDir = os.path.join(inputDirRoot,areas[0], 'maps')
-if sys.argv[3] == "states" : inputDir = os.path.join(inputDirRoot,areas[0], 'states')
+inputDir = os.path.join(inputDirRoot, areas[0], map_folder)
 files = getFileList(inputDir, '*%s.map' % chosenDate)
 
+if len(files) == 0:
+    print("ERROR: no files found in %s matching pattern '*%s.map'" % (inputDir, chosenDate))
+    sys.exit(1)
 
 ncores = min(len(files), ncores)
 print()
-print()
-print('Using %d cores to process' % ncores, end=' ')
-print()
+print('Using %d cores to process %d files' % (ncores, len(files)))
 print()
 
 for fileName in list(files.keys()):
-    #~ print fileName,
     files[fileName]= {}
     ll= []
     outputFileName= os.path.join(outputDir,fileName)
     for area in areas:
-        #~ print area
-        inputFileName= os.path.join(inputDirRoot, area, 'maps', fileName)
-        if sys.argv[3] == "default": inputFileName = os.path.join(inputDirRoot, area, 'maps',   fileName)
-        if sys.argv[3] == "maps"   : inputFileName = os.path.join(inputDirRoot, area, 'maps',   fileName)
-        if sys.argv[3] == "states" : inputFileName = os.path.join(inputDirRoot, area, 'states', fileName)
+        if sys.argv[4] == "default": inputFileName = os.path.join(inputDirRoot, area, 'maps',   fileName)
+        elif sys.argv[4] == "maps"  : inputFileName = os.path.join(inputDirRoot, area, 'maps',   fileName)
+        elif sys.argv[4] == "states": inputFileName = os.path.join(inputDirRoot, area, 'states', fileName)
+        else:                         inputFileName = os.path.join(inputDirRoot, area, map_folder, fileName)
         ll.append(inputFileName)
     files[fileName]= tuple((outputFileName,nrRows,nrCols,lonMin,latMax,deltaLat,MV,ll[:],tempCloneMap))
 
-#~ # this is for testing
-#~ joinMaps(files[fileName])
-
 print()
-print()
-pool = Pool(processes=ncores)       # start "ncores" of worker processes
+pool = Pool(processes=ncores)
 pool.map(joinMaps,list(files.values()))
-print()
 print()
 
 #-remove temporary file
 os.remove(tempCloneMap)
 print(' all done')
-print()
 print()

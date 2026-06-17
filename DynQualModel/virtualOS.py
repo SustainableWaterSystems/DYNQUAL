@@ -3,16 +3,12 @@
 from __future__ import print_function
 
 #
-# PCR-GLOBWB2 (PCRaster Global Water Balance) Global Hydrological Model
+# PCR-GLOBWB (PCRaster Global Water Balance) Global Hydrological Model
 #
 # Copyright (C) 2016, Edwin H. Sutanudjaja, Rens van Beek, Niko Wanders, Yoshihide Wada, 
 # Joyce H. C. Bosmans, Niels Drost, Ruud J. van der Ent, Inge E. M. de Graaf, Jannis M. Hoch, 
 # Kor de Jong, Derek Karssenberg, Patricia López López, Stefanie Peßenteiner, Oliver Schmitz, 
 # Menno W. Straatsma, Ekkamol Vannametee, Dominik Wisser, and Marc F. P. Bierkens
-# Faculty of Geosciences, Utrecht University, Utrecht, The Netherlands
-#
-# DynQual (Dynamic Quality) Global Water Quality Model v1.0
-# Edward R. Jones, Michelle T.H. van Vliet, Niko Wanders, Edwin H. Sutanudjaja, Rens van Beek, and Marc F. P. Bierkens
 # Faculty of Geosciences, Utrecht University, Utrecht, The Netherlands
 #
 # This program is free software: you can redistribute it and/or modify
@@ -27,6 +23,9 @@ from __future__ import print_function
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# EHS (20 March 2013): This is the list of general functions.
+#                      The list is continuation from Rens's and Dominik's.
 
 import shutil
 import subprocess
@@ -67,6 +66,34 @@ netcdf_suffixes = ('.nc4','.nc')
 
 # maximum number of tries for reading files:
 max_num_of_tries = 5
+# ~ # - set it to infinity - NOT RECOMMENDED
+# ~ max_num_of_tries = float("inf")
+
+
+def aguila_with_var_name(pcr_field, file_name, tmp_directory = None):
+
+    if tmp_directory is not None: file_name = tmp_directory + "/" + file_name + ".tmp.map"
+    
+    # save the variable to a pcraster file and visualize it using aguila
+    pcr.report(pcr_field, file_name)
+    # - using os.system
+    cmd = "aguila " + str(file_name) + " & "
+    os.system(cmd)
+    # ~ # - using subprocess
+    # ~ cmd = "aguila " + str(file_name)
+    # ~ print(cmd)
+    # ~ proc = subprocess.Popen([cmd], shell = True,
+                                   # ~ stdin = None, stdout = None, stderr = None, close_fds = True)
+    
+    # ~ # remove the pcraster file - WE CANNOT DO THIS!!! (as the files will still be open/active)
+    # ~ cmd = 'rm ' + file_name
+    # ~ os.system(cmd)
+    
+
+def get_var_name(var):
+    for name, value in globals().items():
+        if value is var:
+            return name
 
 def getFileList(inputDir, filePattern):
     '''creates a dictionary of  files meeting the pattern specified'''
@@ -129,16 +156,19 @@ def singleTryNetcdf2PCRobjCloneWithoutTime(ncFile, varName,\
     #     Only works if cells are 'square'.
     #     Only works if cellsizeClone <= cellsizeInput
     # Get netCDF file and variable name:
-    if ncFile in list(filecache.keys()):
-        f = filecache[ncFile]
-        #~ print "Cached: ", ncFile
-    else:
-        f = nc.Dataset(ncFile)
-        filecache[ncFile] = f
-        #~ print "New: ", ncFile
+
+    # - for file without time steps, we should close it (as most likely, it will be used once only). 
+    #~ if ncFile in list(filecache.keys()):
+        #~ f = filecache[ncFile]
+        #~ # print "Cached: ", ncFile
+    #~ else:
+        #~ f = nc.Dataset(ncFile)
+        #~ filecache[ncFile] = f
+        #~ # print "New: ", ncFile
     
-    #print ncFile
-    #f = nc.Dataset(ncFile)  
+    # print ncFile
+    
+    f = nc.Dataset(ncFile)  
     varName = str(varName)
     
     if varName == "automatic":
@@ -241,8 +271,11 @@ def singleTryNetcdf2PCRobjCloneWithoutTime(ncFile, varName,\
     #~ print(varName)
     #~ os.system('aguila tmp.map')
     
-    #f.close();
+    # we should close the file
+    f.close();
+
     f = None ; cropData = None 
+
     # PCRaster object
     return (outPCR)
 
@@ -2770,3 +2803,8 @@ def rad2deg(a):
     return a * 180.0 / pi
 
 # julian day and relative julian day
+
+
+
+
+
