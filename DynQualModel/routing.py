@@ -4764,7 +4764,7 @@ class Routing(object):
         self.dissolved_oxygen = pcr.ifthenelse(self.channelStorage_Qthres != vos.MV, self.dissolved_oxygen, vos.MV) # DO concentration in mg/l 
         
         ###---Fecal coliform concentrations (pathogen indicator)
-        self.pathogen = pcr.ifthenelse(self.channelStorage_Qthres != vos.MV, self.routedFC * 100. / self.channelStorage_Qthres, vos.MV) # in cfu/100ml
+        self.pathogen = pcr.ifthenelse(self.channelStorage_Qthres != vos.MV, self.routedFC / self.channelStorage_Qthres, vos.MV) # in cfu/100ml
         
         ###---Pharmaceutical concentrations
         if self.simulatePPCPs:    
