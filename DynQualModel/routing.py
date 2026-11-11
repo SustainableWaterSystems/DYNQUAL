@@ -102,11 +102,12 @@ class Routing(object):
         
         # Water quality elements
         if self.quality:
-            result['waterTemperature']        = self.waterTemp              #  K      ; water temperature
-            result['iceThickness']            = self.iceThickness           #  m      ; ice thickness
-            result['routedTDS']               = self.routedTDS              #  g TDS  ; routed TDS load (for conversion to salinity pollution in mg/L)
-            result['routedBOD']               = self.routedBOD              #  g BOD  ; routed BOD load (for conversion to organic pollution mg/L)
-            result['routedFC']                = self.routedFC               #  cfu    ; routed FC load (for conversion to pathogen pollution in cfu/100mL)
+            result['waterTemperature']        = self.waterTemp              #  K        ; water temperature
+            result['iceThickness']            = self.iceThickness           #  m        ; ice thickness
+            result['routedTDS']               = self.routedTDS              #  g TDS    ; routed TDS load (for conversion to salinity pollution in mg/L)
+            result['routedBOD']               = self.routedBOD              #  g BOD    ; routed BOD load (for conversion to organic pollution mg/L)
+            result['routedFC']                = self.routedFC               #  10^6 cfu ; routed FC load (for conversion to pathogen pollution in cfu/100mL)
+            result['DO']                      = self.DO                     #  mg/L     ; dissolved oxygen concentration
             
             if self.calculateLoads and self.loadsPerSector:
                 #- Route pollutants individually per sector (for analysis of sectoral contributions)
@@ -773,6 +774,7 @@ class Routing(object):
                 self.routedTDS = vos.readPCRmapClone(iniItems.routingOptions['routedTDSIni'],self.cloneMap,self.tmpDir,self.inputDir) #initial conditions for salinity pollution
                 self.routedBOD = vos.readPCRmapClone(iniItems.routingOptions['routedBODIni'],self.cloneMap,self.tmpDir,self.inputDir) #initial conditions for organic pollution
                 self.routedFC = vos.readPCRmapClone(iniItems.routingOptions['routedFCIni'],self.cloneMap,self.tmpDir,self.inputDir) #initial conditions for pathogen pollution
+                self.DO = vos.readPCRmapClone(iniItems.routingOptions['DOIni'],self.cloneMap,self.tmpDir,self.inputDir) #initial conditions for dissolved oxygen
                 
                 #pharmaceuticals
                 if self.simulatePPCPs:
@@ -849,6 +851,7 @@ class Routing(object):
                 self.routedTDS               = iniConditions['routing']['routedTDS']
                 self.routedBOD               = iniConditions['routing']['routedBOD']
                 self.routedFC                = iniConditions['routing']['routedFC']
+                self.DO                      = iniConditions['routing']['DO']
                 
                 #pharmaceuticals
                 if self.simulatePPCPs:
@@ -920,7 +923,11 @@ class Routing(object):
         if self.quality:
             self.waterTemp    = pcr.ifthen(self.landmask, pcr.cover(self.waterTemp, 0.0))
             self.iceThickness = pcr.ifthen(self.landmask, pcr.cover(self.iceThickness , 0.0))
-            self.dissolved_oxygen = (1-0.0001148*self.elevation)*exp(-139.34411+(157570.1)/(self.waterTemp)-(66423080.)/(self.waterTemp**2)+(12438000000.)/(self.waterTemp**3)-(862194900000.)/(self.waterTemp**4))
+            waterTemp_DO = pcr.max(self.waterTemp, 273.15)
+            DOsat_ini = (1-0.0001148*self.elevation)*exp(-139.34411+(157570.1)/(waterTemp_DO)-(66423080.)/(waterTemp_DO**2)+(12438000000.)/(waterTemp_DO**3)-(862194900000.)/(waterTemp_DO**4))
+            self.DO = pcr.ifthen(self.landmask, pcr.cover(self.DO, DOsat_ini))
+            self.DO = pcr.ifthenelse((self.DO <= 0.0) | (self.DO > 2.0 * DOsat_ini), DOsat_ini, self.DO)   # cold start (DOIni = 0) or invalid state -> saturation
+            self.dissolved_oxygen = self.DO
             self.channelStorageTimeBefore = self.channelStorage      
             self.totEW = self.channelStorage * self.waterTemp * self.specificHeatWater * self.densityWater
             self.temp_water_height = yMean = self.eta * pow (self.avgDischarge, self.nu)
@@ -1488,6 +1495,8 @@ class Routing(object):
         
         # limiting channel storage to positive values
         self.channelStorage = pcr.max(0., self.channelStorage)         # reported channel storage cannot be negative
+        
+        logger.info("Finished routing with the simplifiedKinematicWave method!")
 
     def update(self,landSurface,groundwater,currTimeStep,meteo):
 
@@ -3023,7 +3032,7 @@ class Routing(object):
                                      str(currTimeStep.fulldate), 
                                      useDoy = "yearly",
                                      cloneMapFileName=self.cloneMap,\
-                                     LatitudeLongitude = True, specificFillValue = None) #country-level fraction of uncollected wastewater that is open defecation
+                                     LatitudeLongitude = True, specificFillValue = None) #country-level fraction of uncollected wastewater that is basic sanitation
             
             self.WWt_od = vos.netcdf2PCRobjClone(\
                                      self.WWtPlantsNC,'WW_od',\
@@ -3757,7 +3766,7 @@ class Routing(object):
         
         #General (time-varying) decay coefficients
         self.water_height_decay = pcr.max(self.water_height, 0.1) #set minimum water depth of 0.1m for decay coefficients        
-        self.tss_decay = self.tss_static if (not self.simulateTSS or currTimeStep.timeStepPCR == 1) else self.TSS
+        self.tss_decay = pcr.cover(self.tss_static if (not self.simulateTSS or currTimeStep.timeStepPCR == 1) else self.TSS_unmasked, 0.0)
         self.attenuation = 0.0931 * self.tss_decay + 0.881 #m-1; Reder et al., (2015)
         
         ###BOD (non-conservative; function of water temperature only)
@@ -3797,10 +3806,10 @@ class Routing(object):
                     k_phot_T = pcr.scalar(0.0)
 
                 #Esimate dissolved fraction: f_diss = 1 / (1 + Kp_sd [L/kg] * TSS [mg/L] * 1e-6)
-                f_diss = pcr.scalar(1.0) / (pcr.scalar(1.0) + pcr.scalar(Kp_sd) * self.tss_decay * pcr.scalar(1e-6))
+                f_diss = pcr.cover(pcr.scalar(1.0) / (pcr.scalar(1.0) + pcr.scalar(Kp_sd) * self.tss_decay * pcr.scalar(1e-6)), 1.0)
 
                 #Combined first-order removal rate (d-1)
-                setattr(self, f"{acr}decay_coef", f_diss * (k_biol_T + k_hydro_T + k_phot_T))
+                setattr(self, f"{acr}decay_coef", pcr.cover(f_diss * (k_biol_T + k_hydro_T + k_phot_T), 0.0))
            
             self.AMXdecay_coef = pcr.scalar(2.6) #no ePie parameters; use first order decay coefficient for Amoxicillin from HydroFATE
    
@@ -4742,7 +4751,7 @@ class Routing(object):
          pcr.ifthen(self.landmask,self.WaterBodies.waterBodyIds))), self.routedsedimentLoad)        
         self.routedsedimentLoad = cover(wbSedimentTotal * self.cellArea \
           /pcr.areatotal(pcr.cover(self.cellArea, 0.0),pcr.ifthen(self.landmask,self.WaterBodies.waterBodyIds)), wbSedimentTotal)
-                            
+
     def estimate_concentrations(self):
         
         #Channel storage with discharge constraint for estimating in-stream concentrations        
@@ -4755,13 +4764,19 @@ class Routing(object):
         self.organic = pcr.ifthenelse(self.channelStorage_Qthres != vos.MV, self.routedBOD / self.channelStorage_Qthres, vos.MV) #in mg/l        
                     
         ###---Estimate dissolved oxygen concentration: Streeter-Phelps equation---###
-        self.k1 = self.BODdecay_temperature * self.organic
+        BOD_conc = pcr.ifthenelse(self.channelStorage > 0, self.routedBOD / self.channelStorage, 0.) #unmasked BOD in mg/l
+        self.k1 = self.BODdecay_temperature * BOD_conc
+        waterTemp_DO = pcr.max(self.waterTemp, 273.15)
         self.DOsat = (1-0.0001148*self.elevation)*exp(-139.34411+(157570.1)/(self.waterTemp)-(66423080.)/(self.waterTemp**2)+(12438000000.)/(self.waterTemp**3)-(862194900000.)/(self.waterTemp**4)) # oxygen saturation in mg/l
-        self.velocity = self.avgDischarge / (self.yMean * self.wMean) # velocity assuming rectangular channel (m/s)
-        self.k2 = 3.93 * (self.velocity ** 0.5) / (self.yMean ** 1.5) # reaeration rate in /d (O'Connor and Dobbins, 1958)
-        self.k2 = pcr.ifthenelse(self.k2 > 1.5, 1.5, pcr.ifthenelse(self.k2 < 0.4, 0.4, self.k2))
-        self.dissolved_oxygen = pcr.ifthenelse(self.dissolved_oxygen - self.k1 + self.k2 * (self.DOsat - self.dissolved_oxygen) < 0.0, 0.0, self.dissolved_oxygen - self.k1 + self.k2 * (self.DOsat - self.dissolved_oxygen))
-        self.dissolved_oxygen = pcr.ifthenelse(self.channelStorage_Qthres != vos.MV, self.dissolved_oxygen, vos.MV) # DO concentration in mg/l 
+        
+        self.velocity = pcr.ifthenelse(self.yMean * self.wMean > 0, self.avgDischarge / (self.yMean * self.wMean), 0.) # velocity assuming rectangular channel (m/s)
+        self.k2 = pcr.ifthenelse(self.yMean > 0.01, 3.93 * (self.velocity ** 0.5) / (self.yMean ** 1.5), 1.5) # reaeration rate in /d (O'Connor and Dobbins, 1958)
+        self.k2 = pcr.cover(pcr.ifthenelse(self.k2 > 1.5, 1.5, pcr.ifthenelse(self.k2 < 0.4, 0.4, self.k2)), 0.4)
+        
+        DO_prev = pcr.cover(self.DO, self.DOsat)
+        DO_prev = pcr.ifthenelse((DO_prev < 0.0) | (DO_prev > 2.0 * self.DOsat), self.DOsat, DO_prev) #reset missing/implausible state to saturation
+        self.DO = pcr.max(DO_prev - self.k1 + self.k2 * (self.DOsat - DO_prev), 0.0)
+        self.dissolved_oxygen = pcr.ifthenelse(self.channelStorage_Qthres != vos.MV, self.DO, vos.MV) # DO concentration in mg/l (output only)
         
         ###---Fecal coliform concentrations (pathogen indicator)
         self.pathogen = pcr.ifthenelse(self.channelStorage_Qthres != vos.MV, self.routedFC / self.channelStorage_Qthres, vos.MV) # in cfu/100ml
@@ -4780,4 +4795,5 @@ class Routing(object):
         ##---TSS (estimate TSS concentration)
         if self.simulateTSS:
             self.sedimentConcentration = pcr.ifthenelse(self.channelStorage_Qthres != vos.MV, self.routedsedimentLoad / self.channelStorage_Qthres, 0.)
-            self.TSS = pcr.ifthenelse(self.channelStorage_Qthres != vos.MV, self.sedimentConcentration * 1000.0, vos.MV)  
+            self.TSS = pcr.ifthenelse(self.channelStorage_Qthres != vos.MV, self.sedimentConcentration * 1000.0, vos.MV)
+            self.TSS_unmasked = pcr.ifthenelse(self.channelStorage > 0, self.routedsedimentLoad / self.channelStorage * 1000.0, 0.) #for decay coefficients
