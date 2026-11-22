@@ -1,0 +1,15 @@
+# Conda environment for DynQual on Windows
+#   conda env create -f dynqual_env.yml
+name: dynqual
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.10
+  - numpy<2
+  - pcraster=4.3.3=*_3
+  - gdal
+  - netcdf4
+  - nco
+  - six
+  - python-dateutil
